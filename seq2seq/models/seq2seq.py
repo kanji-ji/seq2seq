@@ -347,6 +347,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
         for i in range(2, tgt_length + 1):
             output, next_index = outputs[-i]
             output = output[prev_index]
+            next_index = next_index[prev_index] #really necessary?
             top_k_outputs.insert(0, output.unsqueeze(0))
             prev_index = next_index
 
