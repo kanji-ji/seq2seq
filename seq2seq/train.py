@@ -62,11 +62,9 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
         criterion: loss function
         train_dataloader (DataLoader): Dataloader of train data
         valid_dataloader (DataLoader): Dataloader of validation data
-        tgt_vocab(Vocab): Vocab instance of target vocabulary
+        tgt_vocab (Vocab): Vocab instance of target vocabulary
         epochs (int)
         model_file (string): the name of the file to save the model in
-        print_every (int): an interval of print training situation. Default:1
-        plot_every (int): an interval of recording validation loss. Default:1
     Return:
         plot_losses (list of float): validation loss records
     TODO: save the model when bleu score is maximum
@@ -78,7 +76,7 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
     # bleuに関してbestなものを選んだ方がいいかも
     best_loss = np.inf
     best_bleu = 0.0
-    num_epoch = valid_dataloader.data_size // valid_dataloader.batch_size
+    num_epoch = valid_dataloader.size // valid_dataloader.batch_size
 
     for epoch in range(epochs):
         teacher_forcing_ratio = max(0, 1 - 1.5 * epoch / epochs)
@@ -177,8 +175,8 @@ def main():
     data_size = train.data_size
 
     # make dictionary
-    src_words = Vocab()
-    tgt_words = Vocab()
+    src_words = utils.Vocab()
+    tgt_words = utils.Vocab()
 
     for i in range(data_size):
         for word in (train.data.loc[i, 'src']).split():
@@ -261,7 +259,7 @@ def main():
         f.write(dump)
 
     # not to include <PAD> in loss calculation
-    criterion = nn.CrossEntropyLoss(ignore_index=utils.Vocab.pad_token)
+    criterion = nn.CrossEntropyLoss(ignore_index=utils.Vocab.pad_id)
 
     params = {
         'src_num_vocab': src_words.size,

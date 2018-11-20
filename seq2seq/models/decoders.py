@@ -24,13 +24,12 @@ class Decoder(nn.Module):
     def __init__(self, num_vocab, embedding_dim, hidden_size,
                  embedding_matrix):
         super(Decoder, self).__init__()
-        embedding_matrix = torch.from_numpy(embedding_matrix)
         self.hidden_size = hidden_size
         self.embed = nn.Embedding(
-            num_vocab,
-            embedding_dim=embedding_dim,
-            padding_idx=0,
-            _weight=embedding_matrix)
+            num_vocab, embedding_dim=embedding_dim, padding_idx=0)
+        if embedding_matrix is not None:
+            embedding_matrix = torch.from_numpy(embedding_matrix)
+            self.embed.weight.data = embedding_matrix
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_size)
         self.linear = nn.Linear(hidden_size, num_vocab)
 
@@ -78,12 +77,11 @@ class GlobalAttentionDecoder(nn.Module):
         self.embedding_dim = embedding_dim
         self.hidden_size = hidden_size
         self.dropout_p = dropout_p
-        embedding_matrix = torch.from_numpy(embedding_matrix)
         self.embed = nn.Embedding(
-            num_vocab,
-            embedding_dim=self.embedding_dim,
-            padding_idx=0,
-            _weight=embedding_matrix)
+            num_vocab, embedding_dim=self.embedding_dim, padding_idx=0)
+        if embedding_matrix is not None:
+            embedding_matrix = torch.from_numpy(embedding_matrix)
+            self.embed.weight.data = embedding_matrix
         #self.dropout = nn.Dropout(self.dropout_p)
         self.lstm = nn.LSTM(
             input_size=embedding_dim, hidden_size=self.hidden_size)
@@ -148,12 +146,11 @@ class BahdanauAttentionDecoder(nn.Module):
         self.embedding_dim = embedding_dim
         self.hidden_size = hidden_size
         self.dropout_p = dropout_p
-        embedding_matrix = torch.from_numpy(embedding_matrix)
         self.embed = nn.Embedding(
-            num_vocab,
-            embedding_dim=self.embedding_dim,
-            padding_idx=0,
-            _weight=embedding_matrix)
+            num_vocab, embedding_dim=self.embedding_dim, padding_idx=0)
+        if embedding_matrix is not None:
+            embedding_matrix = torch.from_numpy(embedding_matrix)
+            self.embed.weight.data = embedding_matrix
         #self.dropout = nn.Dropout(self.dropout_p)
         self.hidden_linear = nn.Linear(self.hidden_size, self.hidden_size)
         self.attn_linear = nn.Linear(self.hidden_size, self.hidden_size)
@@ -181,16 +178,14 @@ class BahdanauAttentionDecoder(nn.Module):
         h, c = hidden
         seq_len = encoder_outputs.size(0)
         embed = self.embed(decoder_input)  #(batch_size,1,embedding_dim)
-        attn_hidden = self.attn_linear(encoder_outputs).permute(
-            1, 2, 0)  #(batch_size,hidden_size,seq_len)
+        attn_hidden = self.attn_linear(
+            encoder_outputs)  #(seq_len,batch_size,hidden_size)
         hidden_hidden = self.hidden_linear(h).squeeze(
             0)  #(batch_size,hidden_size)
-        hidden_hidden = hidden_hidden.repeat(seq_len, 1, 1).permute(1, 2, 0)
         attn_hidden += hidden_hidden
         attn_hidden = torch.tanh(attn_hidden)
-        attn_scores = torch.matmul(
-            attn_hidden.permute(0, 2, 1),
-            self.dot_vector)  #(batch_size,seq_len)
+        attn_scores = torch.matmul(attn_hidden, self.dot_vector).permute(
+            1, 0)  #(batch_size, seq_len)
         if mask is not None:
             attn_scores.data.masked_fill_(mask, -float('inf'))
         attn_weights = torch.softmax(attn_scores, dim=-1)

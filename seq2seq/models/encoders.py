@@ -31,7 +31,7 @@ class BiEncoder(nn.Module):
             num_vocab, embedding_dim=embedding_dim, padding_idx=0)
         if embedding_matrix is not None:
             embedding_matrix = torch.from_numpy(embedding_matrix)
-            self.embed.data = embedding_matrix
+            self.embed.weight.data = embedding_matrix
         self.bilstm = nn.LSTM(
             input_size=embedding_dim,
             hidden_size=hidden_size,
