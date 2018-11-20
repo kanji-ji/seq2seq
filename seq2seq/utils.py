@@ -1,11 +1,10 @@
 import re
+from nltk.translate.bleu_score import sentence_bleu
 import MeCab
 import mojimoji
 import pandas as pd
 from sklearn.utils import shuffle
 import torch
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class DataReader(object):
@@ -246,6 +245,7 @@ class DataLoader(object):
         self.start_index += self.batch_size
 
         #nn.Embeddingに入力するTensorの型はtorch.longでないといけないらしい
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         batch_X = torch.tensor(batch_X, dtype=torch.long, device=device)
         batch_Y = torch.tensor(batch_Y, dtype=torch.long, device=device)
         lengths = torch.tensor(lengths, dtype=torch.int64, device=device)
@@ -341,3 +341,21 @@ def clean_tokenize(data):
     data = data.applymap(replace_number)
     data = data.applymap(replace_alphabet)
     return data
+
+
+def calc_bleu(y_pred, y_true):
+    """
+    src(tensor):
+    tgt(tensor):
+    """
+    y_pred = y_pred.tolist()
+    y_true = y_true.tolist()
+
+    bleu = 0.0
+
+    for hyp, ref in zip(y_pred, y_true):
+        bleu += sentence_bleu([ref], hyp)
+
+    bleu /= len(y_pred)
+
+    return bleu

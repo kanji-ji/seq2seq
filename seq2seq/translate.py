@@ -1,4 +1,5 @@
 import argparse
+import json
 import pickle
 import numpy as np
 import pandas as pd
@@ -35,7 +36,7 @@ def main():
     parser.add_argument('--attention')
 
     args = parser.parse_args()
-    batch_size = args.batch_size if args.batch_size is not None else 16
+    batch_size = args.batch_size if args.batch_size is not None else 20
     src_maxlen = args.src_maxlen if args.src_maxlen is not None else 100
     tgt_maxlen = args.tgt_maxlen if args.tgt_maxlen is not None else 100
     model_file = args.model_file if args.model_file is not None else 'tmp.model'
@@ -62,17 +63,18 @@ def main():
     with open('tgt.vocab', 'rb') as f:
         tgt_words = pickle.load(f)
 
-    with open('unknown.set', 'rb') as f:
-        unknown_set = pickle.load(f)
+    with open('unknown.json', 'rb') as f:
+        unknown_list = json.loads(f.read(), 'utf-8')
+        unknwon_set = set(unknown_list)
 
     for i in range(data_size):
         for j, word in enumerate(test.data.loc[i, 'src'].split()):
             if word in unknown_set:
-                word = '<UNK>'
+                word = utils.Vocab.unk_token
             src[i][j] = src_words.word2id(word)
         for j, word in enumerate(test.data.loc[i, 'tgt'].split()):
             if word in unknown_set:
-                word = '<UNK>'
+                word = utils.Vocab.unk_token
             tgt[i][j] = tgt_words.word2id(word)
 
     src = src[:, :-1]  #<EOS>削除
@@ -89,7 +91,7 @@ def main():
     print('Loading model...')
     model.load_state_dict(torch.load(MODEL_PATH + model_file))
 
-    iteration = 100 // batch_size + 1
+    iteration = 100 // batch_size
 
     with open(SAMPLE_PATH + sample_file, 'w') as f:
 

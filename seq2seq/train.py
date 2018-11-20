@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import codecs
+import json
 import pickle
 import time
 from gensim.models.word2vec import Word2Vec
@@ -14,8 +16,8 @@ from torch import optim
 from models import seq2seq
 import utils
 
-MODEL_PATH = "./saved_models/"
-FIGURE_PATH = "./figures/"
+MODEL_PATH = './saved_models/'
+FIGURE_PATH = './figures/'
 
 
 def train(src,
@@ -52,16 +54,8 @@ def train(src,
     return loss.item()
 
 
-def train_iters(model,
-                criterion,
-                train_dataloader,
-                valid_dataloader,
-                tgt_vocab,
-                epochs,
-                model_file,
-                print_every=1,
-                plot_every=1,
-                teacher_forcing_ratio=0.8):
+def train_iters(model, criterion, train_dataloader, valid_dataloader,
+                tgt_vocab, epochs, model_file):
     """Train Encoder-Decoder model
     Args:
         model: seq2seq model
@@ -84,10 +78,11 @@ def train_iters(model,
     # bleuに関してbestなものを選んだ方がいいかも
     best_loss = np.inf
     best_bleu = 0.0
+    num_epoch = valid_dataloader.data_size // valid_dataloader.batch_size
 
     for epoch in range(epochs):
+        teacher_forcing_ratio = max(0, 1 - 1.5 * epoch / epochs)
         start = time.time()
-        train_loss = 0
         valid_loss = 0
         valid_acc = 0
         model.train()
@@ -103,19 +98,15 @@ def train_iters(model,
                 tgt_vocab,
                 is_train=True,
                 teacher_forcing_ratio=teacher_forcing_ratio)
-            train_loss += loss
-            if batch_id % print_every == 0:
-                elapsed_sec = time.time() - start
-                elapsed_min = int(elapsed_sec / 60)
-                elapsed_sec = elapsed_sec - 60 * elapsed_min
-                print(
-                    '\rEpoch:{} Batch:{}/{} Loss:{:.4f} Time:{}m{:.1f}s'.
-                    format(
-                        epoch, batch_id,
-                        int(train_dataloader.size /
-                            train_dataloader.batch_size),
-                        train_loss / (1 + batch_id), elapsed_min, elapsed_sec),
-                    end='')
+            elapsed_sec = time.time() - start
+            elapsed_min = elapsed_sec // 60
+            elapsed_sec = elapsed_sec - 60 * elapsed_min
+            print(
+                '\rEpoch:{} Batch:{}/{} Loss:{:.4f} Time:{}m{:.1f}s'.format(
+                    epoch, batch_id,
+                    train_dataloader.size // train_dataloader.batch_size, loss,
+                    elapsed_min, elapsed_sec),
+                end='')
         print()
         model.eval()
         for batch_id, (batch_X, batch_Y,
@@ -133,15 +124,14 @@ def train_iters(model,
                 teacher_forcing_ratio=0)
             valid_loss += loss
             #valid_bleu += bleu
-            if batch_id % plot_every == 0:
-                plot_losses.append(loss)
+            plot_losses.append(loss)
 
-        mean_valid_loss = valid_loss / (1 + batch_id)
-        #mean_valid_bleu = valid_bleu / (1 + batch_id)
+        mean_valid_loss = valid_loss / num_epoch
+        #mean_valid_bleu = valid_bleu / num_epoch
         print('Valid Loss:{:.4f}'.format(mean_valid_loss))
         # save model when valid loss is minimum
-        if mean_valid_loss < best_loss:
-            best_loss = mean_valid_loss
+        if mean_valid_loss < best_loss:  #mean_valid_bleu > best_bleu
+            best_loss = mean_valid_loss  #best_bleu = mean_valid_bleu
             torch.save(model.state_dict(), MODEL_PATH + model_file)
 
     return plot_losses
@@ -265,8 +255,10 @@ def main():
     src = src[:, :-1]  # <EOS>削除
     tgt = tgt[:, 1:]  # <BOS>削除
 
-    with open('unknown.set', 'wb') as f:
-        pickle.dump(unknown_set, f)
+    with codecs.open('unknown.json', 'w', 'utf-8') as f:
+        unknown_list = list(unknown_set)
+        dump = json.dumps(unknown_list, ensure_ascii=False)
+        f.write(dump)
 
     # not to include <PAD> in loss calculation
     criterion = nn.CrossEntropyLoss(ignore_index=utils.Vocab.pad_token)
@@ -280,8 +272,8 @@ def main():
         'tgt_embedding_matrix': tgt_embedding_matrix
     }
 
-    with open('params.dict', 'wb') as f:
-        pickle.dump(params, f)
+    with open('params.json', 'w') as f:
+        json.dump(params, f)
 
     if args.attention is None:
         model = seq2seq.EncoderDecoder(**params).to(device)
@@ -289,25 +281,21 @@ def main():
         model = seq2seq.GlobalAttentionEncoderDecoder(**params).to(device)
 
     train_src, valid_src, train_tgt, valid_tgt, train_src_lengths, valid_src_lengths = train_test_split(
-        src, tgt, src_lengths, test_size=0.2)
+        src, tgt, src_lengths, test_size=0.1)
     train_dataloader = utils.DataLoader(
         train_src, train_tgt, train_src_lengths, batch_size=batch_size)
     valid_dataloader = utils.DataLoader(
         valid_src, valid_tgt, valid_src_lengths, batch_size=batch_size)
 
     print('Start Training')
-    losses = []
-    for teacher_forcing_ratio in [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]:
-        partial_losses = train_iters(
-            model,
-            criterion,
-            train_dataloader,
-            valid_dataloader,
-            src_words,
-            epochs=5,
-            model_file=model_file,
-            teacher_forcing_ratio=teacher_forcing_ratio)
-        losses.extend(partial_losses)
+    losses = train_iters(
+        model,
+        criterion,
+        train_dataloader,
+        valid_dataloader,
+        src_words,
+        epochs=5,
+        model_file=model_file)
 
     plt.figure(figsize=(20, 8))
     plt.ylim(0, max(losses) + 1)
