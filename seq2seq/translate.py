@@ -65,7 +65,7 @@ def main():
 
     with open('unknown.json', 'r') as f:
         unknown_list = json.loads(f.read(), encoding='utf-8')
-        unknwon_set = set(unknown_list)
+        unknown_set = set(unknown_list)
 
     for i in range(data_size):
         for j, word in enumerate(test.data.loc[i, 'src'].split()):
