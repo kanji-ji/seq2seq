@@ -1,24 +1,22 @@
-import numpy as np
 import torch
 from torch import nn
-import torch.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 class BiEncoder(nn.Module):
-    '''Bidirectional Encoder
+    """Bidirectional Encoder
 
     Args:
-        num_vocab: vocabulary size of input sequences
-        embedding_dim: dimensions of embedding vector
-        hidden_size: hidden dimensions of LSTM
-        embedding_matrix: initial values of embedding matrix
+        num_vocab (int): vocabulary size of input sequences
+        embedding_dim (int): dimensions of embedding vector
+        hidden_size (int): hidden dimensions of LSTM
+        embedding_matrix (np.array): initial values of embedding matrix
     
     Attributes:
-        hidden_size
-        embed: nn.Embedding initialized by embedding_matrix
+        hidden_size (int):
+        embed (nn.Embedding): initialized by embedding_matrix or random values
         bilstm: bidirectional LSTM
-    '''
+    """
 
     def __init__(self,
                  num_vocab,
@@ -38,26 +36,27 @@ class BiEncoder(nn.Module):
             bidirectional=True)
 
     def forward(self, x, lengths):
-        '''
+        """
         Args:
             x: input sequence (batch_size, seq_len)
-            lengths: tensor that retains true lengths before padding. must be sorted. shape=(batch_size,)
+            lengths: tensor that retains true lengths before padding.
+                must be sorted. shape=(batch_size, )
         Returns:
-            output: LSTM output, shape=(seq_len,batch_size,hidden_size)
-            (h, c): LSTM states at last timestep, each shape is (1,batch_size,2*hidden_size)
-        '''
-        embed = self.embed(x)  #(batch_size, seq_len, embedding_dim)
+            output: LSTM output, shape=(seq_len, batch_size, hidden_size)
+            (h, c): LSTM states at last timestep.
+                each shape is (1, batch_size, 2 * hidden_size)
+        """
+        embed = self.embed(x)  # (batch_size, seq_len, embedding_dim)
         embed = pack_padded_sequence(
-            embed, lengths, batch_first=True)  #PackedSequenceに変換
+            embed, lengths, batch_first=True)  # PackedSequenceに変換
         assert embed[0].size(0) == torch.sum(lengths), '{},{}'.format(
             embed[0].size(0), torch.sum(lengths))
 
         output, (h, c) = self.bilstm(
             embed
-        )  #(any_len, batch_size, 2*hidden_size), (2, batch_size, hidden_size)
+        )  # (any_len, batch_size, 2*hidden_size), (2, batch_size, hidden_size)
         # reshape states into (1,batch_size, 2*hidden_size)
         h = h.permute(1, 2, 0).contiguous().view(1, -1, 2 * self.hidden_size)
         c = c.permute(1, 2, 0).contiguous().view(1, -1, 2 * self.hidden_size)
-        #print(output[0].size())
         output, lengths = pad_packed_sequence(output)
-        return output, (h, c)  #(seq_len, batch_size, hidden_size)
+        return output, (h, c)  # (seq_len, batch_size, hidden_size)

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import argparse
 import json
 import pickle
@@ -6,7 +8,6 @@ import pandas as pd
 import torch
 from models import seq2seq
 import utils
-from utils import *
 
 MODEL_PATH = "./saved_models/"
 SAMPLE_PATH = './samples/'
@@ -80,7 +81,7 @@ def main():
     src = src[:, :-1]  #<EOS>削除
     tgt = tgt[:, 1:]  #<BOS>削除
 
-    test_dataloader = DataLoader(src, tgt, src_lengths, batch_size=batch_size)
+    test_dataloader = utils.DataLoader(src, tgt, src_lengths, batch_size=batch_size, shuffle=False)
 
     with open('params.json', 'r') as f:
         params = json.load(f)
@@ -91,19 +92,13 @@ def main():
     print('Loading model...')
     model.load_state_dict(torch.load(MODEL_PATH + model_file))
 
-    iteration = 100 // batch_size
-
     with open(SAMPLE_PATH + sample_file, 'w') as f:
 
-        for i in range(iteration):
-
-            test_dataloader.reset()
-
-            batch_X, batch_Y, X_length = next(test_dataloader)
+        for batch_X, batch_Y, X_length in test_dataloader:
 
             tgt_length = batch_Y.size(1)
 
-            y_pred = model.sample(batch_X, X_length, tgt_length, tgt_words)
+            y_pred = model.sample(batch_X, X_length, tgt_length)
 
             X = batch_X.tolist()
             Y_true = batch_Y.tolist()

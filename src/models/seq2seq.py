@@ -32,17 +32,17 @@ class EncoderDecoder(nn.Module):
         self.decoder = Decoder(tgt_num_vocab, embedding_dim, 2 * hidden_size,
                                tgt_embedding_matrix)
 
-    def forward(self, src, tgt, lengths, dec_vocab, teacher_forcing_ratio=0.8):
+    def forward(self, src, tgt, lengths, teacher_forcing_ratio=0.8):
         output, encoder_states = self.encoder(src, lengths)
 
         tgt_length = tgt.size(1)  # tgt.size() = (batch_size, seq_len)
-        batch_size = tgt.size(0)
+        batch_size = src.size(0)
 
         outputs = []
 
         decoder_states = encoder_states
         decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
+            [utils.Vocab.bos_id] * batch_size,
             dtype=torch.long,
             device=self.device).unsqueeze(1)  # (batch_size,1)
 
@@ -60,29 +60,13 @@ class EncoderDecoder(nn.Module):
                 decoder_input = topi.permute(1, 0)  # (batch_size, 1)
 
         outputs = torch.cat(
-            outputs, dim=0).permute(1, 2, 0)  # (batch_size,vocab_size,seq_len)
+            outputs, dim=0).permute(1, 2, 0)  # (batch_size,num_vocab,seq_len)
         return outputs
 
-    def sample(self, src, lengths, tgt_length, dec_vocab):
-        output, encoder_states = self.encoder(src, lengths)
-        batch_size = src.size(0)
-        outputs = []
-
-        decoder_states = encoder_states
-        decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
-            dtype=torch.long,
-            device=self.device).unsqueeze(1)  # (batch_size,1)
-
-        for i in range(tgt_length):
-            output, decoder_states = self.decoder(
-                decoder_input, decoder_states)  # (1,batch_size,vocab_size)
-            topv, topi = torch.max(output, 2)  # (1, batch_size)
-            outputs.append(topi)  # greedy search
-            decoder_input = topi.permute(1, 0)  # (batch_size, 1)
-
-        outputs = torch.cat(
-            outputs, dim=0).permute(1, 0)  # (batch_size,seq_len)
+    def sample(self, src, lengths, tgt_length):
+        tgt = torch.empty(1, tgt_length)  # dummy variable
+        outputs = self.forward(src, tgt, lengths, teacher_forcing_ratio=0)
+        _, outputs = outputs.max(1)
         return outputs
 
 
@@ -112,10 +96,10 @@ class GlobalAttentionEncoderDecoder(nn.Module):
             dropout_p=dropout_p)
         self.use_mask = use_mask
 
-    def forward(self, src, tgt, lengths, dec_vocab, teacher_forcing_ratio):
+    def forward(self, src, tgt, lengths, teacher_forcing_ratio):
         encoder_outputs, encoder_states = self.encoder(src, lengths)
         tgt_length = tgt.size(1)
-        batch_size = tgt.size(0)
+        batch_size = src.size(0)
 
         mask = None
         if self.use_mask:
@@ -126,7 +110,7 @@ class GlobalAttentionEncoderDecoder(nn.Module):
 
         decoder_states = encoder_states
         decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
+            [utils.Vocab.bos_id] * batch_size,
             dtype=torch.long,
             device=self.device).unsqueeze(1)  # (batch_size, 1)
 
@@ -149,38 +133,17 @@ class GlobalAttentionEncoderDecoder(nn.Module):
             outputs, dim=0).permute(1, 2, 0)  # (batch_size,vocab_size,seq_len)
         return outputs
 
-    def sample(self, src, lengths, tgt_length, dec_vocab):
-        encoder_outputs, encoder_states = self.encoder(src, lengths)
-
-        src = pack_padded_sequence(src, lengths, batch_first=True)
-        src, _ = pad_packed_sequence(src, batch_first=True)
-        mask = torch.ne(src, 0)  # (batch_size, seq_len)
-
-        batch_size = src.size(0)
-        decoder_states = encoder_states
-        decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
-            dtype=torch.long,
-            device=self.device).unsqueeze(1)  # (batch_size, 1)
-
-        outputs = []
-
-        for i in range(tgt_length):
-            output, decoder_states, attn_weights = self.decoder(
-                decoder_input, decoder_states, encoder_outputs, mask)
-            topv, topi = torch.max(output, 2)  # (1, batch_size)
-            outputs.append(topi)  # greedy search
-            decoder_input = topi.permute(1, 0)  # (batch_size, 1)
-
-        outputs = torch.cat(
-            outputs, dim=0).permute(1, 0)  # (batch_size,seq_len)
+    def sample(self, src, lengths, tgt_length):
+        tgt = torch.empty(1, tgt_length)
+        outputs = self.forward(src, tgt, lengths, teacher_forcing_ratio=0)
+        _, outputs = outputs.max(1)
         return outputs
 
 
 class GlobalAttentionBeamEncoderDecoder(nn.Module):
     """Encoder+GlobalAttentionDecoder as a single class(beam search version)
     Attributes:
-        beam_size: if 1, this should work the same as GlobalAttentionEncoderDecoder Default:4   
+        beam_size (int): Default: 4 
     """
 
     def __init__(self,
@@ -207,7 +170,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
         self.beam_size = beam_size
         self.use_mask = use_mask
 
-    def forward(self, src, tgt, lengths, dec_vocab, teacher_forcing_ratio):
+    def forward(self, src, tgt, lengths, teacher_forcing_ratio):
         """
         Args:
             src:
@@ -216,14 +179,15 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
             dec_vocab:
             teacher_forcing_ratio
         Returns:
-            top_k_outputs (tensor): shape=(batch_size, vocab_size, seq_len, k) k is beam_size
+            top_k_outputs (tensor): shape=(batch_size, beam_size, vocab_size, seq_len)
+            top_k_seq (tensor): shape=(batch_size, beam_size, seq_len)
         """
 
         encoder_outputs, encoder_states = self.encoder(src, lengths)
 
         # get scalar values
         tgt_length = tgt.size(1)
-        batch_size = tgt.size(0)
+        batch_size = src.size(0)
         hidden_size = encoder_states[0].size(-1)
 
         mask = None
@@ -235,7 +199,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
 
         decoder_states = encoder_states
         decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
+            [utils.Vocab.bos_id] * batch_size,
             dtype=torch.long,
             device=self.device).unsqueeze(1)  # (batch_size, 1)
         '''
@@ -262,8 +226,9 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
         # append output tensor.repeat output tensor k times to adjust
         # output tensor to be appended after first timestep.
         # index tensor is empty because this is first timestep
-        # (k, batch_size, num_vocab)
-        outputs.append((output.squeeze(0).repeat(self.beam_size), ))
+        # (k, batch_size, num_vocab), (k, batch_size)
+        outputs.append((output.squeeze(0).repeat(self.beam_size),
+                        top_k_words.squeeze(0).permute(1, 0)))
 
         log_probs = F.log_softmax(output)[top_k_words].squeeze(
             0)  # (batch_size, k)
@@ -316,73 +281,81 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
             top_k_words = top_k_words.permute(0, 2, 1, 3).view(
                 1, -1, self.beam_size * self.beam_size)  # (1, batch_size, k*k)
             # take top-k words, this is decoder_input at next timestep
-            top_k_words = top_k_words.squeeze(0)[top_k_index].unsqueeze(
-                0)  # (1, batch_size, k)
+            top_k_words = top_k_words.squeeze(0).gather(
+                1, top_k_index).unsqueeze(0)  # (1, batch_size, k)
 
             top_k_index = top_k_index.permute(1, 0)
             # next, take output tensor
             # (k, batch_size, num_vocab)
             output = output.view(self.beam_size, batch_size, -1)
-            # output dim=3, top_k_index dim=2.
-            # I'm afraid this can cause an error.
-            output = output[top_k_index // 4]
+            output = output.gather(
+                0,
+                top_k_index.expand(self.beam_size, batch_size, output.size(2))
+                // 4)
 
-            outputs.append((output, top_k_index.permute(1, 0) // 4))
+            outputs.append((output, top_k_words.squeeze(0).permute(1, 0),
+                            top_k_index // 4))
 
             # next, take states tensor to feed at next timestep
-            decoder_states = decoder_states.view(
-                self.beamsize, batch_size, -1)  # (k, batch_size, hidden_size)
-            decoder_states = decoder_states[top_k_index // 4]
-            decoder_states = decoder_states.unsqueeze(
-                0)  # (1, k, batch_size, hidden_size)
-            decoder_states = decoder_states.contiguous().view(
-                1, -1, hidden_size)
+            decoder_states = list(decoder_states)
+
+            for i, state in enumerate(decoder_states):
+                # (k, batch_size, hidden_size)
+                state = state.view(self.beamsize, batch_size, -1)
+                state = state.gather(
+                    0,
+                    top_k_index.expand(self.beam_size, batch_size,
+                                       state.size(2)) // 4)
+                state = state.unsqueeze(0)  # (1, k, batch_size, hidden_size)
+                state = state.contiguous().view(1, -1, hidden_size)
+                decoder_states[i] = state
+
+            decoder_states = tuple(decoder_states)
 
         # tracing back phase
+        # (1, k, batch_size, num_vocab)
         top_k_outputs = []
+        # (1, k, batch_size)
+        top_k_seq = []
 
-        output, prev_index = outputs[-1]
+        output, top_k_words, prev_index = outputs[-1]
         top_k_outputs.append(output.unsqueeze(0))
+        top_k_seq.append(top_k_words.unsqueeze(0))
 
         for i in range(2, tgt_length + 1):
-            output, next_index = outputs[-i]
-            output = output[prev_index]
-            next_index = next_index[prev_index] #really necessary?
-            top_k_outputs.insert(0, output.unsqueeze(0))
-            prev_index = next_index
+            if i != tgt_length:
+                output, top_k_words, next_index = outputs[-i]
+                output = output.gather(
+                    0,
+                    prev_index.expand(self.beam_size, batch_size,
+                                      output.size(2)))
+                next_index = next_index.gather(0, prev_index)
+                top_k_words = top_k_words.gather(0, prev_index)
+                top_k_outputs.insert(0, output.unsqueeze(0))
+                top_k_seq.insert(0, top_k_words.unsqueeze(0))
+                prev_index = next_index
+            else:
+                output, top_k_words = output[-i]
+                output = output.gather(
+                    0,
+                    prev_index.expand(self.beam_size, batch_size,
+                                      output.size(2)))
+                top_k_words = top_k_words.gather(0, prev_index)
+                top_k_outputs.insert(0, output.unsqueeze(0))
+                top_k_seq.insert(0, top_k_words.unsqueeze(0))
 
         top_k_outputs = torch.cat(
             top_k_outputs,
-            dim=0).permute(2, 3, 0, 1)  # (batch_size,vocab_size, seq_len, k)
-        return top_k_outputs
+            dim=0).permute(2, 1, 3, 0)  # (batch_size, k, vocab_size, seq_len)
+        top_k_seq = torch.cat(
+            top_k_seq, dim=0).permute(2, 1, 0)  # (batch_size, k, seq_len)
 
-    def sample(self, src, lengths, tgt_length, dec_vocab):
-        #under construction
-        encoder_outputs, encoder_states = self.encoder(src, lengths)
+        return top_k_outputs, top_k_seq
 
-        src = pack_padded_sequence(src, lengths, batch_first=True)
-        src, _ = pad_packed_sequence(src, batch_first=True)
-        mask = torch.ne(src, 0)  # (batch_size, seq_len)
-
-        batch_size = src.size(0)
-        decoder_states = encoder_states
-        decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
-            dtype=torch.long,
-            device=self.device).unsqueeze(1)  # (batch_size, 1)
-
-        outputs = []
-
-        for i in range(tgt_length):
-            output, decoder_states, attn_weights = self.decoder(
-                decoder_input, decoder_states, encoder_outputs, mask)
-            topv, topi = torch.max(output, 2)  # (1, batch_size)
-            outputs.append(topi)  # greedy search
-            decoder_input = topi.permute(1, 0)  # (batch_size, 1)
-
-        outputs = torch.cat(
-            outputs, dim=0).permute(1, 0)  # (batch_size,seq_len)
-        return outputs
+    def sample(self, src, lengths, tgt_length):
+        tgt = torch.empty(1, tgt_length)
+        _, top_k_seq = self.forward(src, tgt, lengths, teacher_forcing_ratio=0)
+        return top_k_seq  # (batch_size, k, seq_len)
 
 
 class BahdanauAttentionEncoderDecoder(nn.Module):
@@ -411,10 +384,10 @@ class BahdanauAttentionEncoderDecoder(nn.Module):
             dropout_p=dropout_p)
         self.use_mask = use_mask
 
-    def forward(self, src, tgt, lengths, dec_vocab, teacher_forcing_ratio):
+    def forward(self, src, tgt, lengths, teacher_forcing_ratio):
         encoder_outputs, encoder_states = self.encoder(src, lengths)
         tgt_length = tgt.size(1)
-        batch_size = tgt.size(0)
+        batch_size = src.size(0)
 
         mask = None
         if self.use_mask:
@@ -424,7 +397,7 @@ class BahdanauAttentionEncoderDecoder(nn.Module):
 
         decoder_states = encoder_states
         decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
+            [utils.Vocab.bos_id] * batch_size,
             dtype=torch.long,
             device=self.device).unsqueeze(1)  # (batch_size, 1)
 
@@ -447,29 +420,8 @@ class BahdanauAttentionEncoderDecoder(nn.Module):
             outputs, dim=0).permute(1, 2, 0)  # (batch_size,vocab_size,seq_len)
         return outputs
 
-    def sample(self, src, lengths, tgt_length, dec_vocab):
-        encoder_outputs, encoder_states = self.encoder(src, lengths)
-
-        src = pack_padded_sequence(src, lengths, batch_first=True)
-        src, _ = pad_packed_sequence(src, batch_first=True)
-        mask = torch.ne(src, 0)  # (batch_size, seq_len)
-
-        batch_size = src.size(0)
-        decoder_states = encoder_states
-        decoder_input = torch.tensor(
-            [dec_vocab.word2id('<BOS>')] * batch_size,
-            dtype=torch.long,
-            device=self.device).unsqueeze(1)  # (batch_size, 1)
-
-        outputs = []
-
-        for i in range(tgt_length):
-            output, decoder_states, attn_weights = self.decoder(
-                decoder_input, decoder_states, encoder_outputs, mask)
-            topv, topi = torch.max(output, 2)  # (1, batch_size)
-            outputs.append(topi)  # greedy search
-            decoder_input = topi.permute(1, 0)  # (batch_size, 1)
-
-        outputs = torch.cat(
-            outputs, dim=0).permute(1, 0)  # (batch_size,seq_len)
+    def sample(self, src, lengths, tgt_length):
+        tgt = torch.empty(1, tgt_length)
+        outputs = self.forward(src, tgt, lengths, teacher_forcing_ratio=0)
+        _, outputs = outputs.max(1)
         return outputs

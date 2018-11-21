@@ -1,9 +1,9 @@
-#!~/.pyenv/versions/anaconda3-5.0.0/bin/python
 # -*- coding: utf-8 -*-
 
 import argparse
 import codecs
 import json
+import math
 import pickle
 import time
 from gensim.models.word2vec import Word2Vec
@@ -26,7 +26,6 @@ def train(src,
           model,
           optimizer,
           criterion,
-          tgt_vocab,
           is_train=True,
           teacher_forcing_ratio=0.8):
     """一回のミニバッチ学習
@@ -36,35 +35,36 @@ def train(src,
         model: seq2seq model
         optimizer (torch.optim)
         criterion: loss function
-        tgt_vocab (Vocab): target vocabulary
         is_train (bool): if True, parameters are upgraded by backpropagain. Default: True
         teacher_forcing_ratio (float): the probability of inputting ground truth(0.0~1.0)
     Returns:
         loss (float): averaged loss of all tokens
     """
-    y_pred = model(src, tgt, lengths, tgt_vocab, teacher_forcing_ratio)
+    y_pred = model(src, tgt, lengths, teacher_forcing_ratio)
 
     loss = criterion(y_pred, tgt)
-    _, y_pred = y_pred.max(1)  #(batch_size, seq_len)
-    bleu = utils.calc_bleu(y_pred, tgt)
 
     if is_train:
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+    else:
+        tgt = tgt.tolist()
+        _, y_pred = y_pred.max(1)  # (batch_size, seq_len)
+        y_pred = y_pred.tolist()
+        bleu = utils.calc_bleu(y_pred, tgt)
 
     return loss.item(), bleu
 
 
 def train_iters(model, criterion, train_dataloader, valid_dataloader,
-                tgt_vocab, epochs, model_file):
+                epochs, model_file):
     """Train Encoder-Decoder model
     Args:
         model: seq2seq model
         criterion: loss function
         train_dataloader (DataLoader): Dataloader of train data
         valid_dataloader (DataLoader): Dataloader of validation data
-        tgt_vocab (Vocab): Vocab instance of target vocabulary
         epochs (int)
         model_file (string): the name of the file to save the model in
     Return:
@@ -78,13 +78,15 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
     # bleuに関してbestなものを選んだ方がいいかも
     best_loss = np.inf
     best_bleu = 0.0
-    num_epoch = valid_dataloader.size // valid_dataloader.batch_size
 
     for epoch in range(epochs):
         teacher_forcing_ratio = max(0, 1 - 1.5 * epoch / epochs)
         start = time.time()
         valid_loss = 0
         valid_bleu = 0
+        num_batch = math.ceil(
+            train_dataloader.size / train_dataloader.batch_size)
+
         model.train()
         for batch_id, (batch_X, batch_Y,
                        X_lengths) in enumerate(train_dataloader):
@@ -95,7 +97,6 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
                 model,
                 optimizer,
                 criterion,
-                tgt_vocab,
                 is_train=True,
                 teacher_forcing_ratio=teacher_forcing_ratio)
             elapsed_sec = time.time() - start
@@ -103,11 +104,13 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
             elapsed_sec = elapsed_sec - 60 * elapsed_min
             print(
                 '\rEpoch:{} Batch:{}/{} Loss:{:.4f} BLEU:{:.2f} Time:{:.0f}m{:.1f}s'
-                .format(epoch + 1, batch_id,
-                        train_dataloader.size // train_dataloader.batch_size,
-                        loss, bleu, elapsed_min, elapsed_sec),
+                .format(epoch + 1, batch_id + 1, num_batch, loss, bleu,
+                        elapsed_min, elapsed_sec),
                 end='')
         print()
+
+        num_batch = math.ceil(
+            valid_dataloader.size / valid_dataloader.batch_size)
         model.eval()
         for batch_id, (batch_X, batch_Y,
                        X_lengths) in enumerate(valid_dataloader):
@@ -118,15 +121,14 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
                 model,
                 optimizer,
                 criterion,
-                tgt_vocab,
                 is_train=False,
                 teacher_forcing_ratio=0)
             valid_loss += loss
             valid_bleu += bleu
             losses.append(loss)
 
-        mean_valid_loss = valid_loss / num_epoch
-        mean_valid_bleu = valid_bleu / num_epoch
+        mean_valid_loss = valid_loss / num_batch
+        mean_valid_bleu = valid_bleu / num_batch
         print('Valid Loss:{:.4f} Valid BLEU:{:.2f}'.format(
             mean_valid_loss, mean_valid_bleu))
         # save model when valid loss is minimum
@@ -209,36 +211,13 @@ def main():
 
         word2vec = Word2Vec.load(args.word2vec_path)
 
-        src_embedding_matrix = np.random.uniform(
-            low=-0.05, high=0.05, size=(src_words.size, embedding_dim))
-        tgt_embedding_matrix = np.random.uniform(
-            low=-0.05, high=0.05, size=(tgt_words.size, embedding_dim))
+        assert embedding_dim == word2vec.size, 'embedding dim unmatched. args:{}, word2vec:{}'.format(
+            embedding_dim, word2vec.size)
 
-        for i, word in enumerate(src_words):
-            try:
-                src_embedding_matrix[i] = word2vec[word]
-            except KeyError:
-                if word not in unknown_set:
-                    unknown_set.add(word)
-        for i, word in enumerate(tgt_words):
-            try:
-                tgt_embedding_matrix[i] = word2vec[word]
-            except KeyError:
-                if word not in unknown_set:
-                    unknown_set.add(word)
+        src_embedding_matrix, src_unknown_set = utils.get_embedding_matrix(src_words, word2vec)
+        tgt_embedding_matrix, tgt_unknown_set = utils.get_embedding_matrix(tgt_words, word2vec)
 
-        src_embedding_matrix[0] = np.zeros((embedding_dim, ))
-        tgt_embedding_matrix[0] = np.zeros((embedding_dim, ))
-
-        src_embedding_matrix = src_embedding_matrix.astype('float32')
-        tgt_embedding_matrix = tgt_embedding_matrix.astype('float32')
-
-        unknown_set.remove(utils.Vocab.pad_token)
-        unknown_set.remove(utils.Vocab.bos_token)
-        unknown_set.remove(utils.Vocab.eos_token)
-        unknown_set.remove(utils.Vocab.unk_token)
-        unknown_set.remove(utils.Vocab.num_token)
-        unknown_set.remove(utils.Vocab.alp_token)
+        unknown_set = src_unknown_set | tgt_unknown_set
 
     src = np.zeros((data_size, src_maxlen), dtype='int32')
     tgt = np.zeros((data_size, tgt_maxlen), dtype='int32')
@@ -294,7 +273,6 @@ def main():
         criterion,
         train_dataloader,
         valid_dataloader,
-        src_words,
         epochs=30,
         model_file=model_file)
 

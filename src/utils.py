@@ -18,6 +18,7 @@ class DataReader(object):
         """
         self.data = pd.DataFrame(columns=['src', 'tgt'])
         self.data_size = len(self.data)
+        self.lengths = None
 
     def add_data_from_csv(self,
                           data_path,
@@ -345,21 +346,43 @@ def clean_tokenize(data):
 
 def calc_bleu(y_pred, y_true):
     """
-    src(tensor):
-    tgt(tensor):
+    src(list of lists):
+    tgt(list of lists):
     """
-    y_pred = y_pred.tolist()
-    y_true = y_true.tolist()
 
     bleu = 0.0
-    chencherry = SmoothingFunction()
+    cc = SmoothingFunction()
 
     for hyp, ref in zip(y_pred, y_true):
-        bleu += sentence_bleu([ref],
-                              hyp,
-                              smoothing_function=chencherry.method1)
+        bleu += sentence_bleu([ref], hyp, smoothing_function=cc.method1)
 
     bleu /= len(y_pred)
     bleu *= 100
 
     return bleu
+
+def get_embedding_matrix(vocab, word2vec):
+    
+    embedding_matrix = np.random.uniform(
+        low=-0.05, high=0.05, size=(src_words.size, word2vec.size))
+    unknown_set = set()
+
+    for i, word in enumerate(vocab):
+        try:
+            embedding_matrix[i] = word2vec[word]
+        except KeyError:
+            if word not in unknown_set:
+                unknown_set.add(word)
+    
+    embedding_matrix[0] = np.zeros((word2vec.size, ))
+    
+    embedding_matrix = embedding_matrix.astype('float32')
+    
+    unknown_set.remove(utils.Vocab.pad_token)
+    unknown_set.remove(utils.Vocab.bos_token)
+    unknown_set.remove(utils.Vocab.eos_token)
+    unknown_set.remove(utils.Vocab.unk_token)
+    unknown_set.remove(utils.Vocab.num_token)
+    unknown_set.remove(utils.Vocab.alp_token)
+
+    return embedding_matrix, unknown_set
