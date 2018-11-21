@@ -45,13 +45,15 @@ def train(src,
     y_pred = model(src, tgt, lengths, tgt_vocab, teacher_forcing_ratio)
 
     loss = criterion(y_pred, tgt)
+    _, y_pred = y_pred.max(1)  #(batch_size, seq_len)
+    bleu = utils.calc_bleu(y_pred, tgt)
 
     if is_train:
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-    return loss.item()
+    return loss.item(), bleu
 
 
 def train_iters(model, criterion, train_dataloader, valid_dataloader,
@@ -72,7 +74,7 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
 
     optimizer = optim.Adam(model.parameters())
 
-    plot_losses = []
+    losses = []
     # bleuに関してbestなものを選んだ方がいいかも
     best_loss = np.inf
     best_bleu = 0.0
@@ -82,11 +84,11 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
         teacher_forcing_ratio = max(0, 1 - 1.5 * epoch / epochs)
         start = time.time()
         valid_loss = 0
-        valid_acc = 0
+        valid_bleu = 0
         model.train()
         for batch_id, (batch_X, batch_Y,
                        X_lengths) in enumerate(train_dataloader):
-            loss = train(
+            loss, bleu = train(
                 batch_X,
                 batch_Y,
                 X_lengths,
@@ -100,17 +102,16 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
             elapsed_min = elapsed_sec // 60
             elapsed_sec = elapsed_sec - 60 * elapsed_min
             print(
-                '\rEpoch:{} Batch:{}/{} Loss:{:.4f} Time:{}m{:.1f}s'.format(
-                    epoch, batch_id,
-                    train_dataloader.size // train_dataloader.batch_size, loss,
-                    elapsed_min, elapsed_sec),
+                '\rEpoch:{} Batch:{}/{} Loss:{:.4f} BLEU:{:.2f} Time:{:.0f}m{:.1f}s'
+                .format(epoch, batch_id,
+                        train_dataloader.size // train_dataloader.batch_size,
+                        loss, bleu, elapsed_min, elapsed_sec),
                 end='')
         print()
         model.eval()
         for batch_id, (batch_X, batch_Y,
                        X_lengths) in enumerate(valid_dataloader):
-            # bleu = ***
-            loss = train(
+            loss, bleu = train(
                 batch_X,
                 batch_Y,
                 X_lengths,
@@ -121,18 +122,20 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
                 is_train=False,
                 teacher_forcing_ratio=0)
             valid_loss += loss
-            #valid_bleu += bleu
-            plot_losses.append(loss)
+            valid_bleu += bleu
+            losses.append(loss)
 
         mean_valid_loss = valid_loss / num_epoch
-        #mean_valid_bleu = valid_bleu / num_epoch
-        print('Valid Loss:{:.4f}'.format(mean_valid_loss))
+        mean_valid_bleu = valid_bleu / num_epoch
+        print('Valid Loss:{:.4f} Valid BLEU:{:.2f}'.format(
+            mean_valid_loss, mean_valid_bleu))
         # save model when valid loss is minimum
-        if mean_valid_loss < best_loss:  #mean_valid_bleu > best_bleu
-            best_loss = mean_valid_loss  #best_bleu = mean_valid_bleu
+        if mean_valid_bleu > best_bleu:
+            best_bleu = mean_valid_bleu
+            print('Saving model because valid BLEU score improved.')
             torch.save(model.state_dict(), MODEL_PATH + model_file)
 
-    return plot_losses
+    return losses
 
 
 def main():
@@ -190,8 +193,8 @@ def main():
     with open('tgt.vocab', 'wb') as f:
         pickle.dump(tgt_words, f)
 
-    print('vocabulary size in choices is', src_words.size)
-    print('vocabulary size in questions is', tgt_words.size)
+    print('vocabulary size in source is', src_words.size)
+    print('vocabulary size in target is', tgt_words.size)
 
     src_embedding_matrix = None
     tgt_embedding_matrix = None
@@ -292,7 +295,7 @@ def main():
         train_dataloader,
         valid_dataloader,
         src_words,
-        epochs=5,
+        epochs=30,
         model_file=model_file)
 
     plt.figure(figsize=(20, 8))

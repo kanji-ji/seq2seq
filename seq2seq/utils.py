@@ -1,5 +1,5 @@
 import re
-from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 import MeCab
 import mojimoji
 import pandas as pd
@@ -352,10 +352,14 @@ def calc_bleu(y_pred, y_true):
     y_true = y_true.tolist()
 
     bleu = 0.0
+    chencherry = SmoothingFunction()
 
     for hyp, ref in zip(y_pred, y_true):
-        bleu += sentence_bleu([ref], hyp)
+        bleu += sentence_bleu([ref],
+                              hyp,
+                              smoothing_function=chencherry.method1)
 
     bleu /= len(y_pred)
+    bleu *= 100
 
     return bleu

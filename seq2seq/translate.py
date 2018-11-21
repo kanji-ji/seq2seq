@@ -45,7 +45,7 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    test = DataReader()
+    test = utils.DataReader()
     test.add_data_from_csv(data_path, 'src', 'tgt', preprocess=False)
 
     test.drop_long_seq(src_maxlen, tgt_maxlen)
@@ -63,7 +63,7 @@ def main():
     with open('tgt.vocab', 'rb') as f:
         tgt_words = pickle.load(f)
 
-    with open('unknown.json', 'rb') as f:
+    with open('unknown.json', 'r') as f:
         unknown_list = json.loads(f.read(), 'utf-8')
         unknwon_set = set(unknown_list)
 
@@ -82,8 +82,8 @@ def main():
 
     test_dataloader = DataLoader(src, tgt, src_lengths, batch_size=batch_size)
 
-    with open('params.dict', 'rb') as f:
-        params = pickle.load(f)
+    with open('params.json', 'r') as f:
+        params = json.load(f)
     assert isinstance(params, dict)
 
     #TODO: モデルを引数によって選べるようにする
