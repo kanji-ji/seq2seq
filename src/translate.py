@@ -34,7 +34,7 @@ def main():
         '--sample_file',
         type=str,
         help='csv file to write inference results in')
-    parser.add_argument('--attention')
+    parser.add_argument('--attention', action='store_true')
 
     args = parser.parse_args()
     batch_size = args.batch_size if args.batch_size is not None else 20
@@ -46,49 +46,46 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    test = utils.DataReader()
+    test = utils.DataBuilder()
     test.add_data_from_csv(data_path, 'src', 'tgt', preprocess=False)
 
     test.drop_long_seq(src_maxlen, tgt_maxlen)
 
-    src_lengths = test.data['src'].str.split().apply(len)
-    src_lengths = np.array(src_lengths).astype('int32') - 1  #後で<EOS>を削除するため
+    
+    with open('./cache/src.vocab', 'rb') as f:
+        src_vocab = pickle.load(f)
 
-    data_size = test.data_size
-    src = np.zeros((data_size, src_maxlen), dtype='int32')
-    tgt = np.zeros((data_size, tgt_maxlen), dtype='int32')
-
-    with open('src.vocab', 'rb') as f:
-        src_words = pickle.load(f)
-
-    with open('tgt.vocab', 'rb') as f:
-        tgt_words = pickle.load(f)
+    with open('./cache/tgt.vocab', 'rb') as f:
+        tgt_vocab = pickle.load(f)
 
     with open('unknown.json', 'r') as f:
         unknown_list = json.loads(f.read(), encoding='utf-8')
         unknown_set = set(unknown_list)
 
-    for i in range(data_size):
-        for j, word in enumerate(test.data.loc[i, 'src'].split()):
-            if word in unknown_set:
-                word = utils.Vocab.unk_token
-            src[i][j] = src_words.word2id(word)
-        for j, word in enumerate(test.data.loc[i, 'tgt'].split()):
-            if word in unknown_set:
-                word = utils.Vocab.unk_token
-            tgt[i][j] = tgt_words.word2id(word)
+    def replace_unknown(text):
+        text = utils.replace_unknown(text, unknown_set)
+        return text
 
+    test.data = test.data.applymap(replace_unknown)
+    
+    src, tgt = test.make_id_array(src_maxlen, tgt_maxlen)
+    
+    src_lengths = test.data['src'].str.split().apply(len)
+    src_lengths = np.array(src_lengths).astype('int32') - 1  #後で<EOS>を削除するため
     src = src[:, :-1]  #<EOS>削除
     tgt = tgt[:, 1:]  #<BOS>削除
 
     test_dataloader = utils.DataLoader(src, tgt, src_lengths, batch_size=batch_size, shuffle=False)
 
-    with open('params.json', 'r') as f:
+    with open('./cache/params.json', 'r') as f:
         params = json.load(f)
     assert isinstance(params, dict)
 
-    #TODO: モデルを引数によって選べるようにする
-    model = seq2seq.EncoderDecoder(**params).to(device)
+    if args.attention:
+        model = seq2seq.GlobalAttentionEncoderDecoder(**params).to(device)
+    else:
+        model = seq2seq.EncoderDecoder(**params).to(device)
+    
     print('Loading model...')
     model.load_state_dict(torch.load(MODEL_PATH + model_file))
 
@@ -105,9 +102,9 @@ def main():
             Y_pred = y_pred.tolist()
 
             for x, y_true, y_pred in zip(X, Y_true, Y_pred):
-                x = src_words.ids2seq(x)
-                y_true = tgt_words.ids2seq(y_true)
-                y_pred = tgt_words.ids2seq(y_pred)
+                x = src_vocab.ids2seq(x)
+                y_true = tgt_vocab.ids2seq(y_true)
+                y_pred = tgt_vocab.ids2seq(y_pred)
                 x = ' '.join(x)
                 y_true = ' '.join(y_true)
                 y_pred = ' '.join(y_pred)

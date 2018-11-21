@@ -43,6 +43,7 @@ def train(src,
     y_pred = model(src, tgt, lengths, teacher_forcing_ratio)
 
     loss = criterion(y_pred, tgt)
+    bleu = 0
 
     if is_train:
         optimizer.zero_grad()
@@ -57,8 +58,8 @@ def train(src,
     return loss.item(), bleu
 
 
-def train_iters(model, criterion, train_dataloader, valid_dataloader,
-                epochs, model_file):
+def train_iters(model, criterion, train_dataloader, valid_dataloader, epochs,
+                model_file):
     """Train Encoder-Decoder model
     Args:
         model: seq2seq model
@@ -90,7 +91,7 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
         model.train()
         for batch_id, (batch_X, batch_Y,
                        X_lengths) in enumerate(train_dataloader):
-            loss, bleu = train(
+            loss, _ = train(
                 batch_X,
                 batch_Y,
                 X_lengths,
@@ -103,9 +104,9 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
             elapsed_min = elapsed_sec // 60
             elapsed_sec = elapsed_sec - 60 * elapsed_min
             print(
-                '\rEpoch:{} Batch:{}/{} Loss:{:.4f} BLEU:{:.2f} Time:{:.0f}m{:.1f}s'
-                .format(epoch + 1, batch_id + 1, num_batch, loss, bleu,
-                        elapsed_min, elapsed_sec),
+                '\rEpoch:{} Batch:{}/{} Loss:{:.4f} Time:{:.0f}m{:.1f}s'.
+                format(epoch + 1, batch_id + 1, num_batch, loss, elapsed_min,
+                       elapsed_sec),
                 end='')
         print()
 
@@ -153,7 +154,7 @@ def main():
     parser.add_argument('--loss_file', type=str)
     parser.add_argument('--word2vec_path', type=str)
     parser.add_argument('--embedding_dim', type=int)
-    parser.add_argument('--attention')
+    parser.add_argument('--attention', action='store_true')
 
     args = parser.parse_args()
 
@@ -168,35 +169,23 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     print('Loading data...')
-    train = utils.DataReader()
+    train = utils.DataBuilder()
     train.add_data_from_csv(data_path, 'src', 'tgt', preprocess=False)
 
     #長い系列のデータを削る
     train.drop_long_seq(src_maxlen, tgt_maxlen)
 
-    src_lengths = train.data['src'].str.split().apply(len)
-    src_lengths = np.array(src_lengths).astype('int32') - 1  #後で<EOS>を削除するため
-
-    data_size = train.data_size
-
     # make dictionary
-    src_words = utils.Vocab()
-    tgt_words = utils.Vocab()
+    src_vocab, tgt_vocab = train.build_vocab()
 
-    for i in range(data_size):
-        for word in (train.data.loc[i, 'src']).split():
-            src_words.add(word)
-        for word in (train.data.loc[i, 'tgt']).split():
-            tgt_words.add(word)
+    with open('./cache/src.vocab', 'wb') as f:
+        pickle.dump(src_vocab, f)
 
-    with open('src.vocab', 'wb') as f:
-        pickle.dump(src_words, f)
+    with open('./cache/tgt.vocab', 'wb') as f:
+        pickle.dump(tgt_vocab, f)
 
-    with open('tgt.vocab', 'wb') as f:
-        pickle.dump(tgt_words, f)
-
-    print('vocabulary size in source is', src_words.size)
-    print('vocabulary size in target is', tgt_words.size)
+    print('vocabulary size in source is', src_vocab.size)
+    print('vocabulary size in target is', tgt_vocab.size)
 
     src_embedding_matrix = None
     tgt_embedding_matrix = None
@@ -214,28 +203,26 @@ def main():
         assert embedding_dim == word2vec.size, 'embedding dim unmatched. args:{}, word2vec:{}'.format(
             embedding_dim, word2vec.size)
 
-        src_embedding_matrix, src_unknown_set = utils.get_embedding_matrix(src_words, word2vec)
-        tgt_embedding_matrix, tgt_unknown_set = utils.get_embedding_matrix(tgt_words, word2vec)
+        src_embedding_matrix, src_unknown_set = utils.get_embedding_matrix(
+            src_vocab, word2vec)
+        tgt_embedding_matrix, tgt_unknown_set = utils.get_embedding_matrix(
+            tgt_vocab, word2vec)
 
         unknown_set = src_unknown_set | tgt_unknown_set
 
-    src = np.zeros((data_size, src_maxlen), dtype='int32')
-    tgt = np.zeros((data_size, tgt_maxlen), dtype='int32')
+    def replace_unknown(text):
+        text = utils.replace_unknown(text, unknown_set)
+        return text
 
-    for i in range(data_size):
-        for j, word in enumerate(train.data.loc[i, 'src'].split()):
-            if word in unknown_set:
-                word = utils.Vocab.unk_token
-            src[i][j] = src_words.word2id(word)
-        for j, word in enumerate(train.data.loc[i, 'tgt'].split()):
-            if word in unknown_set:
-                word = utils.Vocab.unk_token
-            tgt[i][j] = tgt_words.word2id(word)
+    train.data = train.data.applymap(replace_unknown)
 
+    src, tgt = train.make_id_array(src_maxlen, tgt_maxlen)
+    src_lengths = train.data['src'].str.split().apply(len)
+    src_lengths = np.array(src_lengths).astype('int32') - 1  #後で<EOS>を削除するため
     src = src[:, :-1]  # <EOS>削除
     tgt = tgt[:, 1:]  # <BOS>削除
 
-    with codecs.open('unknown.json', 'w', 'utf-8') as f:
+    with codecs.open('./cache/unknown.json', 'w', 'utf-8') as f:
         unknown_list = list(unknown_set)
         dump = json.dumps(unknown_list, ensure_ascii=False)
         f.write(dump)
@@ -244,21 +231,21 @@ def main():
     criterion = nn.CrossEntropyLoss(ignore_index=utils.Vocab.pad_id)
 
     params = {
-        'src_num_vocab': src_words.size,
-        'tgt_num_vocab': tgt_words.size,
+        'src_num_vocab': src_vocab.size,
+        'tgt_num_vocab': tgt_vocab.size,
         'embedding_dim': embedding_dim,
         'hidden_size': 512,
         'src_embedding_matrix': src_embedding_matrix,
         'tgt_embedding_matrix': tgt_embedding_matrix
     }
 
-    with open('params.json', 'w') as f:
+    with open('./cache/params.json', 'w') as f:
         json.dump(params, f)
 
-    if args.attention is None:
-        model = seq2seq.EncoderDecoder(**params).to(device)
-    else:
+    if args.attention:
         model = seq2seq.GlobalAttentionEncoderDecoder(**params).to(device)
+    else:
+        model = seq2seq.EncoderDecoder(**params).to(device)
 
     train_src, valid_src, train_tgt, valid_tgt, train_src_lengths, valid_src_lengths = train_test_split(
         src, tgt, src_lengths, test_size=0.1)

@@ -1,5 +1,6 @@
 import re
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+import numpy as np
 import MeCab
 import mojimoji
 import pandas as pd
@@ -7,8 +8,8 @@ from sklearn.utils import shuffle
 import torch
 
 
-class DataReader(object):
-    """source文とtarget文からなるcsvファイルを読み込んで分かち書き，stopwordsの除去等を行う
+class DataBuilder(object):
+    """read data from many formats. preprocess them. turn them into id np.array.
     """
 
     def __init__(self):
@@ -19,6 +20,9 @@ class DataReader(object):
         self.data = pd.DataFrame(columns=['src', 'tgt'])
         self.data_size = len(self.data)
         self.lengths = None
+        self.src_vocab = None
+        self.tgt_vocab = None
+
 
     def add_data_from_csv(self,
                           data_path,
@@ -33,7 +37,7 @@ class DataReader(object):
         data = pd.read_csv(data_path, encoding='utf-8')
         self.add_data(data, src_column, tgt_column, preprocess)
 
-    def add_data_from_txt(self, data_path, is_src, preprocess=True):
+    def read_data_from_txt(self, data_path, is_src, preprocess=True):
         """
         data_path (string): txt file path
         is_src (bool): src text(True) or tgt text(False)
@@ -51,10 +55,6 @@ class DataReader(object):
         data = data[[src_column, tgt_column]]
         data.columns = ['src', 'tgt']
         if preprocess:
-            for i in range(len(data)):
-                for column in data.columns:
-                    data.loc[i, column] = mojimoji.zen_to_han(
-                        data.loc[i, column], kana=False)
             data = clean_tokenize(data)
         self.data = pd.concat([self.data, data], axis=0, ignore_index=True)
         self.data_size = len(self.data)
@@ -71,6 +71,39 @@ class DataReader(object):
             self.data_size, len(self.data),
             100 * len(self.data) / self.data_size))
         self.data_size = len(self.data)
+
+
+    def build_vocab(self):
+        self.src_vocab = Vocab()
+        self.tgt_vocab = Vocab()
+
+        for i in range(self.data_size):
+            for word in (self.data.loc[i, 'src']).split():
+                self.src_vocab.add(word)
+            for word in (self.data.loc[i, 'tgt']).split():
+                self.tgt_vocab.add(word)
+
+        return self.src_vocab, self.tgt_vocab
+
+
+    def make_id_array(self, src_maxlen, tgt_maxlen):
+        if self.src_vocab is None:
+            print('Please call build_vocab before.')
+            raise Exception
+
+        self.drop_long_seq(src_maxlen, tgt_maxlen)
+        
+        src = np.zeros((self.data_size, src_maxlen), dtype='int32')
+        tgt = np.zeros((self.data_size, tgt_maxlen), dtype='int32')
+        
+        for i in range(self.data_size):
+            for j, word in enumerate(self.data.loc[i, 'src'].split()):
+                src[i][j] = self.src_vocab.word2id(word)
+            for j, word in enumerate(self.data.loc[i, 'tgt'].split()):
+                tgt[i][j] = self.tgt_vocab.word2id(word)
+
+        return src, tgt
+
 
 
 class Vocab(object):
@@ -331,11 +364,33 @@ def replace_alphabet(text):
     return new_text
 
 
+def replace_unknown(text, unknown_set):
+    """
+    Args:
+        text:分かち書きされた文。
+    Return:
+        textの未知語を<UNK>に置換する
+    """
+    new_text = ''
+    for word in text.split():
+        if word in unknown_set:
+            new_text += Vocab.unk_token + ' '
+        elif word == Vocab.eos_token:
+            new_text += word
+        else:
+            new_text += word + ' '
+    return new_text
+
+
 def clean_tokenize(data):
     """
     data (pandas.DataFrmae):
     """
+    def zen_to_han(text):
+        text = mojimoji.zen_to_han(text, kana=False)
+        return text
     m = MeCab.Tagger('-Owakati')
+    data = data.applymap(zen_to_han)
     data = data.applymap(remove_symbol)
     data = data.applymap(m.parse)
     data = data.applymap(add_bos_eos)
@@ -361,6 +416,7 @@ def calc_bleu(y_pred, y_true):
 
     return bleu
 
+
 def get_embedding_matrix(vocab, word2vec):
     
     embedding_matrix = np.random.uniform(
@@ -378,11 +434,11 @@ def get_embedding_matrix(vocab, word2vec):
     
     embedding_matrix = embedding_matrix.astype('float32')
     
-    unknown_set.remove(utils.Vocab.pad_token)
-    unknown_set.remove(utils.Vocab.bos_token)
-    unknown_set.remove(utils.Vocab.eos_token)
-    unknown_set.remove(utils.Vocab.unk_token)
-    unknown_set.remove(utils.Vocab.num_token)
-    unknown_set.remove(utils.Vocab.alp_token)
+    unknown_set.remove(Vocab.pad_token)
+    unknown_set.remove(Vocab.bos_token)
+    unknown_set.remove(Vocab.eos_token)
+    unknown_set.remove(Vocab.unk_token)
+    unknown_set.remove(Vocab.num_token)
+    unknown_set.remove(Vocab.alp_token)
 
     return embedding_matrix, unknown_set

@@ -1,6 +1,4 @@
 /src/data/small_parallel_enja/
-/src/*.vocab
-/src/unknown.json
+/src/cache/
 /src/__pycache__/
-/src/params.json
 /src/models/__pycache__/
