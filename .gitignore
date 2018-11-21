@@ -1,1 +1,6 @@
 /seq2seq/data/small_parallel_enja/
+/seq2seq/*.vocab
+/seq2seq/unknown.json
+/seq2seq/__pycache__/
+/seq2seq/params.json
+

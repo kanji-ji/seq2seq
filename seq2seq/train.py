@@ -103,7 +103,7 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader,
             elapsed_sec = elapsed_sec - 60 * elapsed_min
             print(
                 '\rEpoch:{} Batch:{}/{} Loss:{:.4f} BLEU:{:.2f} Time:{:.0f}m{:.1f}s'
-                .format(epoch, batch_id,
+                .format(epoch + 1, batch_id,
                         train_dataloader.size // train_dataloader.batch_size,
                         loss, bleu, elapsed_min, elapsed_sec),
                 end='')
