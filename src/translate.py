@@ -88,7 +88,7 @@ def main():
         model = seq2seq.EncoderDecoder(**params).to(device)
 
     print('Loading model...')
-    model.load_state_dict(torch.load(MODEL_PATH + model_file, map_location=lambda storage, loc: storage))
+    model.load_state_dict(torch.load(MODEL_PATH + model_file, map_location=device))
 
     with open(SAMPLE_PATH + sample_file, 'w') as f:
 
