@@ -88,8 +88,7 @@ class DataBuilder(object):
 
     def make_id_array(self, src_maxlen, tgt_maxlen):
         if self.src_vocab is None:
-            print('Please call build_vocab before.')
-            raise Exception
+            raise Exception('Vocab is not built. Please call build_vocab before.')
 
         self.drop_long_seq(src_maxlen, tgt_maxlen)
         
@@ -103,7 +102,6 @@ class DataBuilder(object):
                 tgt[i][j] = self.tgt_vocab.word2id(word)
 
         return src, tgt
-
 
 
 class Vocab(object):

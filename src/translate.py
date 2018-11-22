@@ -3,6 +3,7 @@
 import argparse
 import json
 import pickle
+from nltk.translate.bleu_score import sentence_bleu
 import numpy as np
 import pandas as pd
 import torch
@@ -51,14 +52,13 @@ def main():
 
     test.drop_long_seq(src_maxlen, tgt_maxlen)
 
-    
     with open('./cache/src.vocab', 'rb') as f:
-        src_vocab = pickle.load(f)
-
+        test.src_vocab = pickle.load(f)
+        
     with open('./cache/tgt.vocab', 'rb') as f:
-        tgt_vocab = pickle.load(f)
+        test.tgt_vocab = pickle.load(f)
 
-    with open('unknown.json', 'r') as f:
+    with open('./cache/unknown.json', 'r') as f:
         unknown_list = json.loads(f.read(), encoding='utf-8')
         unknown_set = set(unknown_list)
 
@@ -67,15 +67,16 @@ def main():
         return text
 
     test.data = test.data.applymap(replace_unknown)
-    
-    src, tgt = test.make_id_array(src_maxlen, tgt_maxlen)
-    
-    src_lengths = test.data['src'].str.split().apply(len)
-    src_lengths = np.array(src_lengths).astype('int32') - 1  #後で<EOS>を削除するため
-    src = src[:, :-1]  #<EOS>削除
-    tgt = tgt[:, 1:]  #<BOS>削除
 
-    test_dataloader = utils.DataLoader(src, tgt, src_lengths, batch_size=batch_size, shuffle=False)
+    src, tgt = test.make_id_array(src_maxlen, tgt_maxlen)
+
+    src_lengths = test.data['src'].str.split().apply(len)
+    src_lengths = np.array(src_lengths).astype('int32') - 1  # 後で<EOS>を削除するため
+    src = src[:, :-1]  # <EOS>削除
+    tgt = tgt[:, 1:]  # <BOS>削除
+
+    test_dataloader = utils.DataLoader(
+        src, tgt, src_lengths, batch_size=batch_size, shuffle=False)
 
     with open('./cache/params.json', 'r') as f:
         params = json.load(f)
@@ -85,11 +86,13 @@ def main():
         model = seq2seq.GlobalAttentionEncoderDecoder(**params).to(device)
     else:
         model = seq2seq.EncoderDecoder(**params).to(device)
-    
+
     print('Loading model...')
-    model.load_state_dict(torch.load(MODEL_PATH + model_file))
+    model.load_state_dict(torch.load(MODEL_PATH + model_file, map_location=lambda storage, loc: storage))
 
     with open(SAMPLE_PATH + sample_file, 'w') as f:
+
+        bleu = 0.0
 
         for batch_X, batch_Y, X_length in test_dataloader:
 
@@ -102,16 +105,20 @@ def main():
             Y_pred = y_pred.tolist()
 
             for x, y_true, y_pred in zip(X, Y_true, Y_pred):
-                x = src_vocab.ids2seq(x)
-                y_true = tgt_vocab.ids2seq(y_true)
-                y_pred = tgt_vocab.ids2seq(y_pred)
+                x = test.src_vocab.ids2seq(x)
+                y_true = test.tgt_vocab.ids2seq(y_true)
+                y_pred = test.tgt_vocab.ids2seq(y_pred)
                 x = ' '.join(x)
                 y_true = ' '.join(y_true)
                 y_pred = ' '.join(y_pred)
-                #print(x)
-                #print(y_true)
-                print(y_pred)
+                # print(x)
+                # print(y_true)
+                # print(y_pred)
+                bleu += sentence_bleu([y_true], y_pred)
                 f.write(x + ',' + y_true + ',' + y_pred + '\n')
+
+    bleu /= test_dataloader.size
+    print('BLEU score is {:.2f}'.format(bleu))
 
 
 if __name__ == '__main__':

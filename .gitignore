@@ -2,3 +2,4 @@
 /src/cache/
 /src/__pycache__/
 /src/models/__pycache__/
+/src/saved_models/*
