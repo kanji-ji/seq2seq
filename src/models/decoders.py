@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch import nn
-import torch.functional as F
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
@@ -88,9 +88,9 @@ class GlobalAttentionDecoder(nn.Module):
         """
         Args:
             decoder_input: (batch_size, seq_len),seq_len must be 1
-            hidden(tuple): LSTM initial state, shape=(1,batch_size,hidden_size)
-            encoder_outputs: (seq_len,batch_size,hidden_size)
-            mask: each element must be 1 or 0. if 0, corresponding source word won't be paid attention to.(batch_size, seq_len)
+            hidden(tuple): LSTM initial state, shape=(1, batch_size, hidden_size)
+            encoder_outputs: (seq_len, batch_size, hidden_size)
+            mask: each element must be 1 or 0. if 0. (batch_size, seq_len)
         Returns:
             output: Decoder output, shape=(1,batch_size,num_vocab)
             hidden(tuple): LSTM last states, each shape=(1,batch_size,hidden_size)
