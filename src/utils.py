@@ -94,7 +94,7 @@ class DataBuilder(object):
         
         src = np.zeros((self.data_size, src_maxlen), dtype='int32')
         tgt = np.zeros((self.data_size, tgt_maxlen), dtype='int32')
-        
+
         for i in range(self.data_size):
             for j, word in enumerate(self.data.loc[i, 'src'].split()):
                 src[i][j] = self.src_vocab.word2id(word)
@@ -137,7 +137,7 @@ class Vocab(object):
         self.id2word_dict = dict(
             {i: word
              for word, i in self.word2id_dict.items()})
-        self.size = 2
+        self.size = len(self.word2id_dict)
         self.min_count = min_count
         self._i = 0
 

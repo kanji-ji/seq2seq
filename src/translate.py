@@ -54,7 +54,7 @@ def main():
 
     with open('./cache/src.vocab', 'rb') as f:
         test.src_vocab = pickle.load(f)
-        
+
     with open('./cache/tgt.vocab', 'rb') as f:
         test.tgt_vocab = pickle.load(f)
 
@@ -83,12 +83,13 @@ def main():
     assert isinstance(params, dict)
 
     if args.attention:
-        model = seq2seq.GlobalAttentionEncoderDecoder(**params).to(device)
+        model = seq2seq.GlobalAttentionBeamEncoderDecoder(**params).to(device)
     else:
         model = seq2seq.EncoderDecoder(**params).to(device)
 
     print('Loading model...')
-    model.load_state_dict(torch.load(MODEL_PATH + model_file, map_location=device))
+    model.load_state_dict(
+        torch.load(MODEL_PATH + model_file, map_location=device))
 
     with open(SAMPLE_PATH + sample_file, 'w') as f:
 

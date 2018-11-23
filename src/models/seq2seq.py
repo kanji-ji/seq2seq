@@ -213,7 +213,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
         output, decoder_states, attn_weights = self.decoder(
             decoder_input, decoder_states, encoder_outputs, mask)
         _, top_k_words = torch.topk(output, self.beam_size,
-                                        2)  # (1, batch_size, k)
+                                    2)  # (1, batch_size, k)
 
         # repeat decoder_states k times
         h, c = decoder_states  # (1, batch_size, hidden_size)
@@ -231,13 +231,13 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
                                       batch_size, output.size(2)),
                         top_k_words.squeeze(0).permute(1, 0)))
 
-        log_probs = F.log_softmax(output, dim=-1).gather(2, top_k_words).squeeze(
-            0)  # (batch_size, k)
+        log_probs = F.log_softmax(
+            output, dim=-1).gather(2,
+                                   top_k_words).squeeze(0)  # (batch_size, k)
 
-        # (batch_size, seq_len) -> (k*batch_size, seq_len)
-        mask = mask.unsqueeze(0).expand(self.beam_size - 1,
-                                        -1).contiguous().view(
-                                            self.beam_size * batch_size, -1)
+        # (batch_size, seq_len) -> (k * batch_size, seq_len)
+        mask = mask.unsqueeze(0).expand(self.beam_size, - 1, -1)
+        mask = mask.contiguous().view(self.beam_size * batch_size, -1)
         # (seq_len, batch_size, hidden_size) -> (seq_len, k * batch_size, hidden_size)
         encoder_outputs = encoder_outputs.unsqueeze(1).expand(
             -1, self.beam_size, -1, -1).contiguous().view(
@@ -266,7 +266,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
             output, decoder_states, attn_weights = self.decoder(
                 decoder_input, decoder_states, encoder_outputs, mask)
             _, top_k_words = torch.topk(output, self.beam_size,
-                                            2)  # (1, k*batch_size, k)
+                                        2)  # (1, k*batch_size, k)
 
             # compute conditional probs to take top-k words by log_probs.
             # (1, k*batch_size, k)
@@ -282,12 +282,12 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
 
             # (batch_size, k), index can be from 0 to k*k-1
             log_probs, top_k_index = torch.topk(
-                log_probs.contiguous().view(-1, self.beam_size * self.beam_size),
-                self.beam_size, -1)
+                log_probs.contiguous().view(
+                    -1, self.beam_size * self.beam_size), self.beam_size, -1)
 
             # (1, k, batch_size, k) decompose k*batch_size to (k, batch_size)
-            top_k_words = top_k_words.contiguous().view(1, self.beam_size, -1,
-                                           self.beam_size)
+            top_k_words = top_k_words.contiguous().view(
+                1, self.beam_size, -1, self.beam_size)
             top_k_words = top_k_words.permute(0, 2, 1, 3).contiguous().view(
                 1, -1, self.beam_size * self.beam_size)  # (1, batch_size, k*k)
             # take top-k words, this is decoder_input at next timestep
@@ -300,8 +300,8 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
             output = output.contiguous().view(self.beam_size, batch_size, -1)
             output = output.gather(
                 0,
-                top_k_index.unsqueeze(2).expand(self.beam_size, batch_size, output.size(2))
-                // 4)
+                top_k_index.unsqueeze(2).expand(self.beam_size, batch_size,
+                                                output.size(2)) // 4)
 
             outputs.append((output, top_k_words.squeeze(0).permute(1, 0),
                             top_k_index // 4))
@@ -315,7 +315,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
                 state = state.gather(
                     0,
                     top_k_index.unsqueeze(2).expand(self.beam_size, batch_size,
-                                       state.size(2)) // 4)
+                                                    state.size(2)) // 4)
                 state = state.unsqueeze(0)  # (1, k, batch_size, hidden_size)
                 state = state.contiguous().view(1, -1, hidden_size)
                 decoder_states[i] = state
@@ -338,7 +338,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
                 output = output.gather(
                     0,
                     prev_index.unsqueeze(2).expand(self.beam_size, batch_size,
-                                      output.size(2)))
+                                                   output.size(2)))
                 next_index = next_index.gather(0, prev_index)
                 top_k_words = top_k_words.gather(0, prev_index)
                 top_k_outputs.insert(0, output.unsqueeze(0))
@@ -349,7 +349,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
                 output = output.gather(
                     0,
                     prev_index.unsqueeze(2).expand(self.beam_size, batch_size,
-                                      output.size(2)))
+                                                   output.size(2)))
                 top_k_words = top_k_words.gather(0, prev_index)
                 top_k_outputs.insert(0, output.unsqueeze(0))
                 top_k_seq.insert(0, top_k_words.unsqueeze(0))
@@ -360,7 +360,7 @@ class GlobalAttentionBeamEncoderDecoder(nn.Module):
         top_k_seq = torch.cat(
             top_k_seq, dim=0).permute(2, 1, 0)  # (batch_size, k, seq_len)
 
-        return top_k_outputs, top_k_seq
+        return top_k_outputs[:, 0], top_k_seq[:, 0]
 
     def sample(self, src, lengths, tgt_length):
         tgt = torch.empty(1, tgt_length)
