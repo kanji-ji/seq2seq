@@ -23,7 +23,6 @@ class DataBuilder(object):
         self.src_vocab = None
         self.tgt_vocab = None
 
-
     def add_data_from_csv(self,
                           data_path,
                           src_column,
@@ -50,8 +49,6 @@ class DataBuilder(object):
         self.data[column] = pd.Series(text)
 
     def add_data(self, data, src_column, tgt_column, preprocess=True):
-        """
-        """
         data = data[[src_column, tgt_column]]
         data.columns = ['src', 'tgt']
         if preprocess:
@@ -60,8 +57,6 @@ class DataBuilder(object):
         self.data_size = len(self.data)
 
     def drop_long_seq(self, src_maxlen, tgt_maxlen):
-        """一定以上長い系列はデータから取り除く
-        """
         self.data = self.data[
             self.data['src'].str.split().apply(len) <= src_maxlen]
         self.data = self.data[
@@ -71,7 +66,6 @@ class DataBuilder(object):
             self.data_size, len(self.data),
             100 * len(self.data) / self.data_size))
         self.data_size = len(self.data)
-
 
     def build_vocab(self):
         self.src_vocab = Vocab()
@@ -85,13 +79,13 @@ class DataBuilder(object):
 
         return self.src_vocab, self.tgt_vocab
 
-
     def make_id_array(self, src_maxlen, tgt_maxlen):
         if self.src_vocab is None:
-            raise Exception('Vocab is not built. Please call build_vocab before.')
+            raise Exception(
+                'Vocab is not built. Please call build_vocab before.')
 
         self.drop_long_seq(src_maxlen, tgt_maxlen)
-        
+
         src = np.zeros((self.data_size, src_maxlen), dtype='int32')
         tgt = np.zeros((self.data_size, tgt_maxlen), dtype='int32')
 
@@ -105,10 +99,12 @@ class DataBuilder(object):
 
 
 class Vocab(object):
-    """単語とIDのペアを管理するクラス。
+    """ useful dictionary that holds words and their ids.
     Attributes:
-        min_count: 未実装，min_count以下の出現回数の単語はVocabに追加しないようにする
-        
+        min_count: to be implemented
+        word2id_dict (dict):
+        id2word_dict (dict):
+        size (int)
     TODO:
         add min_count option
     """
@@ -155,7 +151,7 @@ class Vocab(object):
     def add(self, word):
         """
         Args:
-            word(string):単語
+            word(string)
         if word is not in Vocab, then add it
         """
         key = self.word2id_dict.setdefault(word, self.size)
@@ -177,7 +173,7 @@ class Vocab(object):
     def word2id(self, word):
         """
         Args:
-            word(string):単語
+            word(string)
         Returns:
             returns id allocated to word if it's in Vocab. Otherwise, returns 1 which means unknown word.
         """
@@ -262,7 +258,6 @@ class DataLoader(object):
         return self
 
     def __next__(self):
-        #start_indexがデータの参照外まで行ったら0に戻し，イテレーションを止める
         if self.start_index >= self.size:
             if self.shuffle:
                 self.reset()
@@ -276,7 +271,6 @@ class DataLoader(object):
                                    self.batch_size]
         self.start_index += self.batch_size
 
-        #nn.Embeddingに入力するTensorの型はtorch.longでないといけないらしい
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         batch_X = torch.tensor(batch_X, dtype=torch.long, device=device)
         batch_Y = torch.tensor(batch_Y, dtype=torch.long, device=device)
@@ -286,18 +280,6 @@ class DataLoader(object):
         batch_X = batch_X[perm_idx]
         batch_Y = batch_Y[perm_idx]
         return batch_X, batch_Y, lengths
-
-
-def remove_choice_number(text):
-    """文頭に選択肢番号がついている場合それを除く。
-    前処理で使うだけなのでこのファイルでは呼び出さない。別のファイルに移したい。
-    """
-    remove_list = [
-        '^ア ', '^イ ', '^ウ ', '^エ ', '^オ ', '^1 ', '^2 ', '^3 ', '^4 ', '^5 '
-    ]
-    for i, word in enumerate(remove_list):
-        text = re.sub(word, '', text)
-    return text
 
 
 def remove_symbol(text):
@@ -313,15 +295,10 @@ def remove_symbol(text):
 
 
 def add_bos_eos(text):
-    """文章の先頭に<BOS>、<EOS>を加える。文末の改行コードの都合で<EOS>の直前にはスペースを入れていない。
-    """
     return Vocab.bos_token + ' ' + text + ' ' + Vocab.eos_token
 
 
 def replace_number(text):
-    """textの数値表現をnumber トークンに置き換える
-    textは分かち書きされていること
-    """
     new_text = ''
     for word in text.split():
         if word.isdigit():
@@ -345,12 +322,6 @@ def isalpha(s):
 
 
 def replace_alphabet(text):
-    """
-    Args:
-        text:分かち書きされた文。
-    Return:
-        textの数値表現をAに置き換える
-    """
     new_text = ''
     for word in text.split():
         if isalpha(word):
@@ -363,12 +334,6 @@ def replace_alphabet(text):
 
 
 def replace_unknown(text, unknown_set):
-    """
-    Args:
-        text:分かち書きされた文。
-    Return:
-        textの未知語を<UNK>に置換する
-    """
     new_text = ''
     for word in text.split():
         if word in unknown_set:
@@ -384,9 +349,11 @@ def clean_tokenize(data):
     """
     data (pandas.DataFrmae):
     """
+
     def zen_to_han(text):
         text = mojimoji.zen_to_han(text, kana=False)
         return text
+
     m = MeCab.Tagger('-Owakati')
     data = data.applymap(zen_to_han)
     data = data.applymap(remove_symbol)
@@ -416,7 +383,7 @@ def calc_bleu(y_pred, y_true):
 
 
 def get_embedding_matrix(vocab, word2vec):
-    
+
     embedding_matrix = np.random.uniform(
         low=-0.05, high=0.05, size=(src_words.size, word2vec.size))
     unknown_set = set()
@@ -427,11 +394,11 @@ def get_embedding_matrix(vocab, word2vec):
         except KeyError:
             if word not in unknown_set:
                 unknown_set.add(word)
-    
+
     embedding_matrix[0] = np.zeros((word2vec.size, ))
-    
+
     embedding_matrix = embedding_matrix.astype('float32')
-    
+
     unknown_set.remove(Vocab.pad_token)
     unknown_set.remove(Vocab.bos_token)
     unknown_set.remove(Vocab.eos_token)

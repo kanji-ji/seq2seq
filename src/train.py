@@ -28,15 +28,15 @@ def train(src,
           criterion,
           is_train=True,
           teacher_forcing_ratio=0.8):
-    """一回のミニバッチ学習
+    """one step minibatch training
     Args:
-        src (torch.Tensor): source data
-        tgt (torch.Tensor): target data
-        model: seq2seq model
+        src (tensor): source data
+        tgt (tensor): target data
+        model (child class of nn.Module): seq2seq model
         optimizer (torch.optim)
         criterion: loss function
         is_train (bool): if True, parameters are upgraded by backpropagain. Default: True
-        teacher_forcing_ratio (float): the probability of inputting ground truth(0.0~1.0)
+        teacher_forcing_ratio (float): the probability of inputting ground truth Default:[0, 1]
     Returns:
         loss (float): averaged loss of all tokens
     """
@@ -51,7 +51,7 @@ def train(src,
         optimizer.step()
     else:
         tgt = tgt.tolist()
-        _, y_pred = y_pred.max(1)  # (batch_size, seq_len)
+        _, y_pred = y_pred.max(1)  # shape = (batch_size, seq_len)
         y_pred = y_pred.tolist()
         bleu = utils.calc_bleu(y_pred, tgt)
 
@@ -62,22 +62,20 @@ def train_iters(model, criterion, train_dataloader, valid_dataloader, epochs,
                 model_file):
     """Train Encoder-Decoder model
     Args:
-        model: seq2seq model
+        model (child class of nn.Module): seq2seq model
         criterion: loss function
         train_dataloader (DataLoader): Dataloader of train data
         valid_dataloader (DataLoader): Dataloader of validation data
         epochs (int)
         model_file (string): the name of the file to save the model in
     Return:
-        plot_losses (list of float): validation loss records
-    TODO: save the model when bleu score is maximum
+        losses (list of float): validation loss records
+    TODO: save the model when BLEU score is maximum
     """
 
     optimizer = optim.Adam(model.parameters())
 
     losses = []
-    # bleuに関してbestなものを選んだ方がいいかも
-    best_loss = np.inf
     best_bleu = 0.0
 
     for epoch in range(epochs):
@@ -172,7 +170,6 @@ def main():
     train = utils.DataBuilder()
     train.add_data_from_csv(data_path, 'src', 'tgt', preprocess=False)
 
-    #長い系列のデータを削る
     train.drop_long_seq(src_maxlen, tgt_maxlen)
 
     # make dictionary
@@ -192,8 +189,8 @@ def main():
 
     unknown_set = set()
 
-    # Embedding層の初期値としてpre-trainさせたword2vec embeddingを用いる。
-    # 単語辞書の中にはword2vecモデルに含まれない単語もあるので、そのembeddingは一様乱数で初期化する
+    # use pre-trained word2vec embedding as Embedding Layer
+    # if a word is not in word2vec model, its embedding initializes from uniform random number.
     if args.word2vec_path is not None:
 
         print('Loading word2vec model...')
@@ -218,10 +215,11 @@ def main():
 
     src, tgt = train.make_id_array(src_maxlen, tgt_maxlen)
     src_lengths = train.data['src'].str.split().apply(len)
-    src_lengths = np.array(src_lengths).astype('int32') - 1  #後で<EOS>を削除するため
-    src = src[:, :-1]  # <EOS>削除
-    tgt = tgt[:, 1:]  # <BOS>削除
+    src_lengths = np.array(src_lengths).astype('int32') - 1  #'cause delete <EOS> later.
+    src = src[:, :-1]  # <EOS> delete
+    tgt = tgt[:, 1:]  # <BOS> delete
 
+    #dump unknown words as json file
     with codecs.open('./cache/unknown.json', 'w', 'utf-8') as f:
         unknown_list = list(unknown_set)
         dump = json.dumps(unknown_list, ensure_ascii=False)
@@ -263,7 +261,7 @@ def main():
         epochs=30,
         model_file=model_file)
 
-    plt.figure(figsize=(20, 8))
+    plt.figure(figsize=(16, 6))
     plt.ylim(0, max(losses) + 1)
     plt.plot(losses)
     plt.savefig(FIGURE_PATH + loss_file)

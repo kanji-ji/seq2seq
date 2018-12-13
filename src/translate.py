@@ -71,9 +71,9 @@ def main():
     src, tgt = test.make_id_array(src_maxlen, tgt_maxlen)
 
     src_lengths = test.data['src'].str.split().apply(len)
-    src_lengths = np.array(src_lengths).astype('int32') - 1  # 後で<EOS>を削除するため
-    src = src[:, :-1]  # <EOS>削除
-    tgt = tgt[:, 1:]  # <BOS>削除
+    src_lengths = np.array(src_lengths).astype('int32') - 1  # 'cause delete <EOS> token later.
+    src = src[:, :-1]  # delete <EOS>
+    tgt = tgt[:, 1:]  # delete <BOS>
 
     test_dataloader = utils.DataLoader(
         src, tgt, src_lengths, batch_size=batch_size, shuffle=False)
